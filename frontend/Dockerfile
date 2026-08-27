@@ -1,7 +1,7 @@
 FROM node:20-alpine AS builder
 WORKDIR /app
-COPY package.json package-lock.json* ./
-RUN npm ci --frozen-lockfile
+COPY package.json ./
+RUN npm install --frozen-lockfile=false
 COPY . .
 RUN npm run build
 
