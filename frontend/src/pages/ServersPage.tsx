@@ -295,7 +295,7 @@ function ServerFormModal({
   function set(k: string, v: unknown) { setForm((f) => ({ ...f, [k]: v })); setApiError('') }
   const numOrNull = (v: unknown) => (v === '' || v === null || v === undefined) ? null : Number(v)
 
-  // Step 1 — verify WinRM credentials
+  // Step 1 — verify WinRM credentials (also auto-fills hardware capacity)
   const verifyMut = useMutation({
     mutationFn: () => serverApi.verifyCredentials({
       hostname: form.hostname,
@@ -305,6 +305,13 @@ function ServerFormModal({
     onSuccess: (data: any) => {
       setVerifiedHost(data.remote_hostname ?? form.hostname)
       setVerifyError('')
+      // Auto-fill capacity fields from live host data
+      setForm((f) => ({
+        ...f,
+        total_cpu_cores:  data.cpu_cores  != null ? String(data.cpu_cores)  : f.total_cpu_cores,
+        total_memory_gb:  data.ram_gb     != null ? String(data.ram_gb)     : f.total_memory_gb,
+        total_storage_gb: data.total_storage_gb != null ? String(data.total_storage_gb) : f.total_storage_gb,
+      }))
       setStep('register')
     },
     onError: (err: any) => {

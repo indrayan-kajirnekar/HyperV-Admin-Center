@@ -44,6 +44,7 @@ class CreateVMRequest(BaseModel):
     iso_path: Optional[str] = None          # path on the host, e.g. C:\ISOs\ubuntu.iso
     nic2_switch: Optional[str] = None       # 2nd NIC virtual switch name
     nic3_switch: Optional[str] = None       # 3rd NIC virtual switch name
+    vm_path: Optional[str] = None           # VM storage base dir, e.g. D:\VMs
 
 class CreateCheckpointRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -161,6 +162,7 @@ async def create_vm_endpoint(
         iso_path=body.iso_path,
         nic2_switch=body.nic2_switch,
         nic3_switch=body.nic3_switch,
+        vm_path=body.vm_path,
     )
     await record_event(
         db, action="vm.create", resource_type="vm", resource_name=body.name,

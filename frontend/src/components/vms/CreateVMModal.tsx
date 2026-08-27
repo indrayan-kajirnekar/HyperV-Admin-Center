@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { vmApi, folderApi, serverApi } from '@/lib/api'
-import { X, Disc, Plus, Trash2 } from 'lucide-react'
+import { X, Disc, Plus, Trash2, HardDrive } from 'lucide-react'
 
 interface Props { onClose: () => void }
 
@@ -19,12 +19,21 @@ export default function CreateVMModal({ onClose }: Props) {
     iso_path: '',
     nic2_switch: '',
     nic3_switch: '',
+    vm_path: '',        // e.g. D:\VMs  — blank = server default (C:\VMs)
   })
   const [quotaError, setQuotaError] = useState<string[]>([])
   const [showISOPicker, setShowISOPicker] = useState(false)
 
   // Extra NICs state (can add up to 2 additional = 3 total)
   const [extraNICs, setExtraNICs] = useState<string[]>([])
+
+  // Drives from selected host
+  interface DriveInfo { Drive: string; FreeGB: number; TotalGB: number }
+  const { data: drives = [] } = useQuery<DriveInfo[]>({
+    queryKey: ['drives', form.hypervisor_id],
+    queryFn: () => serverApi.listDrives(form.hypervisor_id),
+    enabled: !!form.hypervisor_id,
+  })
 
   // ISO list from host
   const { data: isos = [], isFetching: loadingISOs } = useQuery<ISOFile[]>({
@@ -39,6 +48,7 @@ export default function CreateVMModal({ onClose }: Props) {
       iso_path: form.iso_path || null,
       nic2_switch: extraNICs[0] || null,
       nic3_switch: extraNICs[1] || null,
+      vm_path: form.vm_path || null,
     }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['vms'] }); onClose() },
     onError: (err: any) => {
@@ -118,7 +128,7 @@ export default function CreateVMModal({ onClose }: Props) {
             </Field>
           </div>
 
-          {/* Generation */}
+          {/* Generation + VM Storage Drive */}
           <div className="grid grid-cols-2 gap-3">
             <Field label="Generation">
               <select className="select" value={form.generation}
@@ -126,6 +136,26 @@ export default function CreateVMModal({ onClose }: Props) {
                 <option value={2}>Gen 2 (UEFI)</option>
                 <option value={1}>Gen 1 (BIOS)</option>
               </select>
+            </Field>
+            <Field label="VM Storage Drive">
+              <select
+                className="select"
+                value={form.vm_path}
+                onChange={(e) => set('vm_path', e.target.value)}
+                disabled={!form.hypervisor_id || drives.length === 0}
+              >
+                <option value="">Default (C:\VMs)</option>
+                {drives.map((d) => (
+                  <option key={d.Drive} value={`${d.Drive}\\VMs`}>
+                    {d.Drive}\VMs — {d.FreeGB} GB free / {d.TotalGB} GB total
+                  </option>
+                ))}
+              </select>
+              {form.hypervisor_id && drives.length === 0 && (
+                <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
+                  Select a hypervisor to load drives
+                </p>
+              )}
             </Field>
           </div>
 

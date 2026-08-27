@@ -83,10 +83,11 @@ Remove-VM -Name $vmName -Force
 """
 
 _PS_CREATE_VM = r"""
-param($name, $memoryGB, $cpuCount, $diskGB, $switchName, $generation, $isoPath, $nic2Switch, $nic3Switch)
+param($name, $memoryGB, $cpuCount, $diskGB, $switchName, $generation, $isoPath, $nic2Switch, $nic3Switch, $vmBasePath)
 $memBytes = [long]($memoryGB * 1GB)
-$vhdPath = "C:\VMs\$name\$name.vhdx"
-New-Item -ItemType Directory -Path "C:\VMs\$name" -Force | Out-Null
+$base = if ($vmBasePath) { $vmBasePath.TrimEnd('\') } else { 'C:\VMs' }
+$vhdPath = "$base\$name\$name.vhdx"
+New-Item -ItemType Directory -Path "$base\$name" -Force | Out-Null
 $vm = New-VM -Name $name -MemoryStartupBytes $memBytes -Generation $generation `
       -NewVHDSizeBytes ([long]($diskGB * 1GB)) -NewVHDPath $vhdPath -SwitchName $switchName
 Set-VMProcessor $vm -Count $cpuCount
@@ -233,6 +234,7 @@ async def create_vm(
     iso_path: Optional[str] = None,
     nic2_switch: Optional[str] = None,
     nic3_switch: Optional[str] = None,
+    vm_path: Optional[str] = None,
 ) -> Dict:
     result = await _run_ps(
         hostname, _PS_CREATE_VM,
@@ -240,7 +242,7 @@ async def create_vm(
             "name": name, "memoryGB": memory_gb, "cpuCount": cpu_count,
             "diskGB": disk_gb, "switchName": switch_name, "generation": generation,
             "isoPath": iso_path or "", "nic2Switch": nic2_switch or "",
-            "nic3Switch": nic3_switch or "",
+            "nic3Switch": nic3_switch or "", "vmBasePath": vm_path or "",
         },
     )
     await cache_delete_pattern("vms:*")

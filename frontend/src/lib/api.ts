@@ -79,6 +79,8 @@ export const serverApi = {
   update:           (id: string, body: object) => api.patch(`/servers/${id}`, body).then((r) => r.data),
   toggleOnline:     (id: string) => api.post(`/servers/${id}/toggle-online`).then((r) => r.data),
   delete:           (id: string) => api.delete(`/servers/${id}`).then((r) => r.data),
+  listDrives:       (id: string) =>
+                      api.get(`/servers/${id}/drives`).then((r) => r.data),
   listISOs:         (id: string, path?: string) =>
                       api.get(`/servers/${id}/isos`, { params: path ? { path } : {} }).then((r) => r.data),
   uploadFile:       (id: string, destPath: string, file: File) => {

@@ -263,7 +263,26 @@ Get-VMDvdDrive -VMName $vmName | Set-VMDvdDrive -Path $null
 """
 
 _PS_VERIFY_CREDS = r"""
-$env:COMPUTERNAME
+$cpu   = (Get-CimInstance Win32_Processor | Measure-Object -Property NumberOfLogicalProcessors -Sum).Sum
+$ram   = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB, 0)
+$disks = Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null } |
+         Select-Object @{N='Drive';E={"$($_.Name):"}},
+                       @{N='FreeGB';E={[math]::Round($_.Free / 1GB, 1)}},
+                       @{N='TotalGB';E={[math]::Round(($_.Used + $_.Free) / 1GB, 1)}}
+[PSCustomObject]@{
+    ComputerName = $env:COMPUTERNAME
+    CpuCores     = [int]$cpu
+    RamGB        = [int]$ram
+    Disks        = @($disks)
+} | ConvertTo-Json -Depth 3
+"""
+
+_PS_LIST_DRIVES = r"""
+Get-PSDrive -PSProvider FileSystem | Where-Object { $_.Used -ne $null } |
+    Select-Object @{N='Drive';E={"$($_.Name):"}},
+                  @{N='FreeGB';E={[math]::Round($_.Free / 1GB, 1)}},
+                  @{N='TotalGB';E={[math]::Round(($_.Used + $_.Free) / 1GB, 1)}} |
+    ConvertTo-Json -Depth 2
 """
 
 _PS_UPLOAD_FILE = r"""
@@ -291,6 +310,7 @@ async def verify_credentials(
         try:
             from pypsrp.powershell import PowerShell, RunspacePool
             from pypsrp.wsman import WSMan
+            import json as _json
             wsman = WSMan(
                 body.hostname, username=body.username, password=body.password,
                 ssl=False, auth="negotiate", cert_validation=False,
@@ -300,23 +320,47 @@ async def verify_credentials(
                 ps = PowerShell(pool)
                 ps.add_script(_PS_VERIFY_CREDS)
                 output = ps.invoke()
-                return "".join(str(o) for o in output).strip()
+                raw = "".join(str(o) for o in output).strip()
+                try:
+                    return _json.loads(raw)
+                except Exception:
+                    return {"ComputerName": raw, "CpuCores": None, "RamGB": None, "Disks": []}
         except ImportError:
-            # pypsrp not installed — mock success in dev
-            return body.hostname
+            # pypsrp not installed — return mock data for dev
+            return {
+                "ComputerName": body.hostname,
+                "CpuCores": 8, "RamGB": 32,
+                "Disks": [
+                    {"Drive": "C:", "FreeGB": 200.0, "TotalGB": 500.0},
+                    {"Drive": "D:", "FreeGB": 900.0, "TotalGB": 2000.0},
+                ],
+            }
         except Exception as exc:
             raise RuntimeError(str(exc))
 
     loop = asyncio.get_event_loop()
     try:
-        remote_name = await loop.run_in_executor(None, _probe)
+        info = await loop.run_in_executor(None, _probe)
     except RuntimeError as exc:
         raise HTTPException(
             status_code=422,
             detail=f"Cannot connect to '{body.hostname}': {exc}",
         )
 
-    return {"ok": True, "remote_hostname": remote_name}
+    # Sum all disk TotalGB for total_storage_gb
+    disks = info.get("Disks") or []
+    if isinstance(disks, dict):
+        disks = [disks]
+    total_storage = round(sum(d.get("TotalGB", 0) for d in disks), 0)
+
+    return {
+        "ok": True,
+        "remote_hostname": info.get("ComputerName", body.hostname),
+        "cpu_cores": info.get("CpuCores"),
+        "ram_gb": info.get("RamGB"),
+        "total_storage_gb": total_storage or None,
+        "disks": disks,
+    }
 
 
 # ─── ISO Browse ───────────────────────────────────────────────────────────────
@@ -333,6 +377,26 @@ async def list_isos(
     if not h.is_online:
         raise HTTPException(409, "Server is marked offline")
     result = await _run_ps(h.hostname, _PS_LIST_ISOS, {"path": path or ""})
+    if isinstance(result, dict):
+        result = [result]
+    elif not isinstance(result, list):
+        result = []
+    return result
+
+
+# ─── Drives (list volumes on registered host) ────────────────────────────────
+
+@router.get("/{hypervisor_id}/drives")
+async def list_drives(
+    hypervisor_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List filesystem drives (C:, D:, …) and their free/total space on the Hyper-V host."""
+    h = await _get_or_404(db, hypervisor_id)
+    if not h.is_online:
+        raise HTTPException(409, "Server is marked offline")
+    result = await _run_ps(h.hostname, _PS_LIST_DRIVES)
     if isinstance(result, dict):
         result = [result]
     elif not isinstance(result, list):
