@@ -4,14 +4,14 @@
  * - Searchable / filterable table with online/offline badges
  * - Register new server, edit, toggle online/offline, delete
  * - Per-row VM count from cache (zero latency)
- * - Folder assignment visible inline
+ * - Folder assignment visible inline — with inline "New Folder" creation
  */
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { serverApi, folderApi } from '@/lib/api'
 import {
   Server, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
-  Search, X, Cpu, RefreshCw,
+  Search, X, Cpu, FolderPlus,
 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 
@@ -63,17 +63,6 @@ export default function ServersPage() {
     },
   })
 
-  const syncMut = useMutation({
-    mutationFn: (id: string) => serverApi.syncFolders(id),
-    onSuccess: (data: any) => {
-      qc.invalidateQueries({ queryKey: ['servers'] })
-      qc.invalidateQueries({ queryKey: ['folders'] })
-      alert(data?.message ?? 'Sync complete.')
-    },
-    onError: (err: any) => {
-      alert(err?.response?.data?.detail ?? 'Sync failed.')
-    },
-  })
 
   const filtered = useMemo(() => {
     const q = filter.toLowerCase()
@@ -245,19 +234,6 @@ export default function ServersPage() {
                   : <ToggleLeft size={16} style={{ color: 'var(--text-muted)' }} />}
               </button>
               <button
-                className="btn-ghost p-1.5"
-                title="Sync VM Groups as Folders from this host"
-                onClick={() => {
-                  if (confirm(`Sync VM Groups from "${s.display_name ?? s.hostname}" as Folders?\nNew groups will be created as folders and this server will be assigned to them.`)) {
-                    syncMut.mutate(s.id)
-                  }
-                }}
-                disabled={syncMut.isPending || !s.is_online}
-              >
-                <RefreshCw size={13} style={{ color: 'var(--accent)' }}
-                  className={syncMut.isPending ? 'animate-spin' : ''} />
-              </button>
-              <button
                 className="btn-ghost p-1.5" title="Edit server"
                 onClick={() => setEditServer(s)}
               >
@@ -306,6 +282,20 @@ function ServerFormModal({
   const [verifiedHost, setVerifiedHost] = useState(existing?.hostname ?? '')
   const [creds, setCreds] = useState({ username: '', password: '' })
   const [verifyError, setVerifyError] = useState('')
+
+  // Inline new-folder creation
+  const [showNewFolder, setShowNewFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState('')
+
+  const createFolderMut = useMutation({
+    mutationFn: (name: string) => folderApi.create({ name }),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['folders'] })
+      set('folder_id', data.id)
+      setNewFolderName('')
+      setShowNewFolder(false)
+    },
+  })
 
   const [form, setForm] = useState({
     hostname:          existing?.hostname ?? '',
@@ -474,7 +464,43 @@ function ServerFormModal({
               </div>
 
               <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>Assign to Folder</label>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-xs font-medium" style={{ color: 'var(--text-muted)' }}>Assign to Folder</label>
+                  <button
+                    type="button"
+                    className="flex items-center gap-1 text-xs"
+                    style={{ color: 'var(--accent)' }}
+                    onClick={() => setShowNewFolder((v) => !v)}
+                  >
+                    <FolderPlus size={12} />
+                    {showNewFolder ? 'Cancel' : 'New Folder'}
+                  </button>
+                </div>
+
+                {/* Inline new folder input */}
+                {showNewFolder && (
+                  <div className="flex gap-2 mb-2">
+                    <input
+                      className="input flex-1 text-xs h-8"
+                      placeholder="Folder name e.g. Production"
+                      autoFocus
+                      value={newFolderName}
+                      onChange={(e) => setNewFolderName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && newFolderName.trim()) createFolderMut.mutate(newFolderName.trim())
+                        if (e.key === 'Escape') setShowNewFolder(false)
+                      }}
+                    />
+                    <button
+                      className="btn-primary text-xs px-3 h-8"
+                      disabled={!newFolderName.trim() || createFolderMut.isPending}
+                      onClick={() => createFolderMut.mutate(newFolderName.trim())}
+                    >
+                      {createFolderMut.isPending ? '…' : 'Create'}
+                    </button>
+                  </div>
+                )}
+
                 <select className="select" value={form.folder_id} onChange={(e) => set('folder_id', e.target.value)}>
                   <option value="">— Unassigned —</option>
                   {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
