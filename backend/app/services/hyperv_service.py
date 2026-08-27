@@ -111,7 +111,13 @@ $vm | Select-Object Name, Id, State | ConvertTo-Json
 
 # ─── WinRM executor helper ────────────────────────────────────────────────────
 
-def _run_ps_sync(hostname: str, script: str, parameters: dict | None = None) -> Any:
+def _run_ps_sync(
+    hostname: str,
+    script: str,
+    parameters: dict | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> Any:
     """Synchronous PowerShell remoting call via pypsrp. Runs in a thread pool."""
     try:
         from pypsrp.powershell import PowerShell, RunspacePool
@@ -120,10 +126,14 @@ def _run_ps_sync(hostname: str, script: str, parameters: dict | None = None) -> 
         # Return mock data when pypsrp is not installed (dev / CI env)
         return _mock_ps_response(hostname, script, parameters)
 
+    # Use per-host creds if provided, fall back to global env creds
+    _user = username or settings.HYPERV_USERNAME
+    _pass = password or settings.HYPERV_PASSWORD
+
     wsman = WSMan(
         hostname,
-        username=settings.HYPERV_USERNAME,
-        password=settings.HYPERV_PASSWORD,
+        username=_user,
+        password=_pass,
         ssl=False,
         auth="negotiate",
         cert_validation=False,
@@ -164,9 +174,17 @@ def _mock_ps_response(hostname: str, script: str, params: dict | None) -> Any:
     return {}
 
 
-async def _run_ps(hostname: str, script: str, parameters: dict | None = None) -> Any:
+async def _run_ps(
+    hostname: str,
+    script: str,
+    parameters: dict | None = None,
+    username: str | None = None,
+    password: str | None = None,
+) -> Any:
     loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, _run_ps_sync, hostname, script, parameters)
+    return await loop.run_in_executor(
+        None, _run_ps_sync, hostname, script, parameters, username, password
+    )
 
 
 # ─── Public API ───────────────────────────────────────────────────────────────

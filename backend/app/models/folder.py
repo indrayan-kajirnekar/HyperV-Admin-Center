@@ -42,6 +42,9 @@ class Hypervisor(Base):
     total_cpu_cores: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     total_memory_gb: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
     total_storage_gb: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
+    # Per-server WinRM credentials (stored plaintext — encrypt at rest in production)
+    winrm_username: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    winrm_password: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     last_seen_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
 

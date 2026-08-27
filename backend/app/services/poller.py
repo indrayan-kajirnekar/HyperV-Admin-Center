@@ -59,7 +59,11 @@ async def _poll_all_hosts(db_factory) -> None:
 
 async def _poll_host(hypervisor: Hypervisor) -> None:
     try:
-        raw = await _run_ps(hypervisor.hostname, _PS_GET_VMS)
+        raw = await _run_ps(
+            hypervisor.hostname, _PS_GET_VMS,
+            username=hypervisor.winrm_username or None,
+            password=hypervisor.winrm_password or None,
+        )
         vms: List[Dict] = raw if isinstance(raw, list) else ([raw] if raw else [])
 
         # Tag with hypervisor context

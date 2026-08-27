@@ -61,6 +61,8 @@ class ServerUpdate(BaseModel):
     total_cpu_cores: Optional[int] = Field(None, ge=1)
     total_memory_gb: Optional[float] = Field(None, ge=0)
     total_storage_gb: Optional[float] = Field(None, ge=0)
+    winrm_username: Optional[str] = None
+    winrm_password: Optional[str] = None
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -83,6 +85,8 @@ def _server_dict(h: Hypervisor, folders: list | None = None, vm_count: int = 0) 
         "total_memory_gb": h.total_memory_gb,
         "total_storage_gb": h.total_storage_gb,
         "vm_count": vm_count,
+        "has_credentials": bool(h.winrm_username and h.winrm_password),
+        "winrm_username": h.winrm_username,  # shown in UI for reference
         "created_at": h.created_at.isoformat() if h.created_at else None,
         "last_seen_at": h.last_seen_at.isoformat() if h.last_seen_at else None,
     }
@@ -145,8 +149,8 @@ async def register_server(
     if existing.scalar_one_or_none():
         raise HTTPException(409, f"A server with hostname '{body.hostname}' is already registered.")
 
-    # Exclude credential fields — they are not stored in the Hypervisor model
-    h = Hypervisor(**body.model_dump(exclude={"winrm_username", "winrm_password"}))
+    # Store credentials per-hypervisor so the poller can use them
+    h = Hypervisor(**body.model_dump())
     db.add(h)
     await db.flush()
     await record_event(
@@ -387,7 +391,8 @@ async def list_isos(
     h = await _get_or_404(db, hypervisor_id)
     if not h.is_online:
         raise HTTPException(409, "Server is marked offline")
-    result = await _run_ps(h.hostname, _PS_LIST_ISOS, {"path": path or ""})
+    result = await _run_ps(h.hostname, _PS_LIST_ISOS, {"path": path or ""},
+                           username=h.winrm_username, password=h.winrm_password)
     if isinstance(result, dict):
         result = [result]
     elif not isinstance(result, list):
@@ -407,7 +412,8 @@ async def list_drives(
     h = await _get_or_404(db, hypervisor_id)
     if not h.is_online:
         raise HTTPException(409, "Server is marked offline")
-    result = await _run_ps(h.hostname, _PS_LIST_DRIVES)
+    result = await _run_ps(h.hostname, _PS_LIST_DRIVES,
+                           username=h.winrm_username, password=h.winrm_password)
     if isinstance(result, dict):
         result = [result]
     elif not isinstance(result, list):
@@ -438,7 +444,8 @@ async def upload_file(
     import base64
     raw = await file.read()
     b64 = base64.b64encode(raw).decode()
-    await _run_ps(h.hostname, _PS_UPLOAD_FILE, {"destPath": dest_path, "b64Content": b64})
+    await _run_ps(h.hostname, _PS_UPLOAD_FILE, {"destPath": dest_path, "b64Content": b64},
+                  username=h.winrm_username, password=h.winrm_password)
     return {"uploaded": True, "dest_path": dest_path, "size_bytes": len(raw)}
 
 
@@ -454,7 +461,8 @@ async def eject_cd(
 ):
     """Unmount/eject the DVD drive ISO from a running VM."""
     h = await _get_or_404(db, hypervisor_id)
-    await _run_ps(h.hostname, _PS_EJECT_DVD, {"vmName": vm_name})
+    await _run_ps(h.hostname, _PS_EJECT_DVD, {"vmName": vm_name},
+                  username=h.winrm_username, password=h.winrm_password)
     await record_event(
         db, "vm.eject_cd", "vm", f"{hypervisor_id}/{vm_name}", vm_name,
         current_user.id, current_user.email, status="success",
@@ -503,7 +511,8 @@ async def list_vm_groups(
     h = await _get_or_404(db, hypervisor_id)
     if not h.is_online:
         raise HTTPException(409, "Server is marked offline")
-    result = await _run_ps(h.hostname, _PS_LIST_VM_GROUPS)
+    result = await _run_ps(h.hostname, _PS_LIST_VM_GROUPS,
+                           username=h.winrm_username, password=h.winrm_password)
     if isinstance(result, dict):
         result = [result]
     elif not isinstance(result, list):
@@ -533,7 +542,8 @@ async def sync_folders_from_host(
         raise HTTPException(409, "Server is marked offline")
 
     # 1. Fetch VM groups from host
-    raw = await _run_ps(h.hostname, _PS_LIST_VM_GROUPS)
+    raw = await _run_ps(h.hostname, _PS_LIST_VM_GROUPS,
+                        username=h.winrm_username, password=h.winrm_password)
     if isinstance(raw, dict):
         raw = [raw]
     elif not isinstance(raw, list):
