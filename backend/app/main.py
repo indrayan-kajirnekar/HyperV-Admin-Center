@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.middleware.gzip import GZipMiddleware
 from fastapi.responses import ORJSONResponse
 from contextlib import asynccontextmanager
+from sqlalchemy.exc import IntegrityError
 
 from app.core.config import settings
 from app.core.database import init_db, AsyncSessionFactory
@@ -24,17 +25,22 @@ async def lifespan(app: FastAPI):
     await init_db()
     await get_redis()  # warm connection pool
 
-    # Bootstrap super-admin if database is empty
+    # Bootstrap super-admin — guarded against concurrent worker races
     async with AsyncSessionFactory() as db:
-        existing = await get_user_by_email(db, settings.BOOTSTRAP_ADMIN_EMAIL)
-        if not existing:
-            await create_user(
-                db, settings.BOOTSTRAP_ADMIN_EMAIL,
-                settings.BOOTSTRAP_ADMIN_NAME, settings.BOOTSTRAP_ADMIN_PASSWORD,
-                role="super_admin",
-            )
-            await db.commit()
-            log.info("app.bootstrap.admin_created", email=settings.BOOTSTRAP_ADMIN_EMAIL)
+        try:
+            existing = await get_user_by_email(db, settings.BOOTSTRAP_ADMIN_EMAIL)
+            if not existing:
+                await create_user(
+                    db, settings.BOOTSTRAP_ADMIN_EMAIL,
+                    settings.BOOTSTRAP_ADMIN_NAME, settings.BOOTSTRAP_ADMIN_PASSWORD,
+                    role="super_admin",
+                )
+                await db.commit()
+                log.info("app.bootstrap.admin_created", email=settings.BOOTSTRAP_ADMIN_EMAIL)
+        except IntegrityError:
+            # Another worker already inserted the admin — safe to ignore
+            await db.rollback()
+            log.info("app.bootstrap.admin_exists")
 
     # Start background VM poller
     await start_background_poller(AsyncSessionFactory)
