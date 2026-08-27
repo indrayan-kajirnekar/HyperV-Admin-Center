@@ -40,6 +40,10 @@ export const vmApi = {
                      api.delete(`/vms/${hid}/${name}/checkpoints/${snapId}`).then((r) => r.data),
   revertCheckpoint:(hid: string, name: string, snapId: string) =>
                      api.post(`/vms/${hid}/${name}/checkpoints/${snapId}/revert`).then((r) => r.data),
+  ejectCD:         (hid: string, name: string) =>
+                     api.post(`/servers/${hid}/vms/${name}/eject-cd`).then((r) => r.data),
+  consoleToken:    (hid: string, name: string) =>
+                     api.post(`/servers/${hid}/vms/${name}/console-token`).then((r) => r.data),
 }
 
 // ─── Folder API ───────────────────────────────────────────────────────────────
@@ -67,12 +71,23 @@ export const userApi = {
 
 // ─── Server (Hypervisor) API ──────────────────────────────────────────────────
 export const serverApi = {
-  list:         (folderId?: string) => api.get('/servers', { params: folderId ? { folder_id: folderId } : {} }).then((r) => r.data),
-  get:          (id: string) => api.get(`/servers/${id}`).then((r) => r.data),
-  register:     (body: object) => api.post('/servers', body).then((r) => r.data),
-  update:       (id: string, body: object) => api.patch(`/servers/${id}`, body).then((r) => r.data),
-  toggleOnline: (id: string) => api.post(`/servers/${id}/toggle-online`).then((r) => r.data),
-  delete:       (id: string) => api.delete(`/servers/${id}`).then((r) => r.data),
+  list:             (folderId?: string) => api.get('/servers', { params: folderId ? { folder_id: folderId } : {} }).then((r) => r.data),
+  get:              (id: string) => api.get(`/servers/${id}`).then((r) => r.data),
+  verifyCredentials:(body: { hostname: string; username: string; password: string }) =>
+                      api.post('/servers/verify-credentials', body).then((r) => r.data),
+  register:         (body: object) => api.post('/servers', body).then((r) => r.data),
+  update:           (id: string, body: object) => api.patch(`/servers/${id}`, body).then((r) => r.data),
+  toggleOnline:     (id: string) => api.post(`/servers/${id}/toggle-online`).then((r) => r.data),
+  delete:           (id: string) => api.delete(`/servers/${id}`).then((r) => r.data),
+  listISOs:         (id: string, path?: string) =>
+                      api.get(`/servers/${id}/isos`, { params: path ? { path } : {} }).then((r) => r.data),
+  uploadFile:       (id: string, destPath: string, file: File) => {
+    const fd = new FormData(); fd.append('file', file)
+    return api.post(`/servers/${id}/upload`, fd, {
+      params: { dest_path: destPath },
+      headers: { 'Content-Type': 'multipart/form-data' },
+    }).then((r) => r.data)
+  },
 }
 
 // ─── Auth extras ──────────────────────────────────────────────────────────────

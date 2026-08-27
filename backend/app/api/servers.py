@@ -1,30 +1,43 @@
 """
 Servers (Hypervisors) API
 Dedicated router for full Hyper-V server management:
+  - Credential-verify before registering
   - Register / edit / delete hypervisor records
   - Toggle online/offline status
   - Assign to folders
   - Test connectivity (ping via WinRM)
+  - ISO browsing from host file system
+  - File upload staging to host
+  - Eject CD/DVD from running VM
+  - Console session token (for WebSocket noVNC proxy)
   - View per-server VM summary from cache
 """
 from __future__ import annotations
+import asyncio
+import secrets
 from datetime import datetime, timezone
 from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, UploadFile, File
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
 from app.core.security import get_current_user
-from app.core.cache import cache_get
+from app.core.cache import cache_get, cache_set
 from app.models.folder import Hypervisor, Folder
 from app.services.audit_service import record_event
+from app.services.hyperv_service import _run_ps
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
 
 # ─── Schemas ──────────────────────────────────────────────────────────────────
+
+class CredentialVerifyRequest(BaseModel):
+    hostname: str = Field(..., min_length=1, max_length=255)
+    username: str = Field(..., min_length=1)
+    password: str = Field(..., min_length=1)
 
 class ServerCreate(BaseModel):
     hostname: str = Field(..., min_length=1, max_length=255,
@@ -34,6 +47,9 @@ class ServerCreate(BaseModel):
     total_cpu_cores: Optional[int] = Field(None, ge=1)
     total_memory_gb: Optional[float] = Field(None, ge=0)
     total_storage_gb: Optional[float] = Field(None, ge=0)
+    # Per-server credential override (stored encrypted in production)
+    winrm_username: Optional[str] = None
+    winrm_password: Optional[str] = None
 
 
 class ServerUpdate(BaseModel):
@@ -225,3 +241,172 @@ async def delete_server(
         current_user.id, current_user.email, status="success",
         ip_address=request.client.host if request.client else None,
     )
+
+
+# ─── PowerShell helpers for ISO / upload / eject ─────────────────────────────
+
+_PS_LIST_ISOS = r"""
+param($path)
+$root = if ($path) { $path } else { 'C:\ISOs' }
+if (-not (Test-Path $root)) { New-Item -ItemType Directory -Path $root | Out-Null }
+Get-ChildItem -Path $root -Filter *.iso -ErrorAction SilentlyContinue |
+    Select-Object Name, FullName,
+        @{N='SizeMB';E={[math]::Round($_.Length / 1MB, 1)}},
+        LastWriteTime |
+    ConvertTo-Json -Depth 2
+"""
+
+_PS_EJECT_DVD = r"""
+param($vmName)
+Get-VMDvdDrive -VMName $vmName | Set-VMDvdDrive -Path $null
+"""
+
+_PS_VERIFY_CREDS = r"""
+$env:COMPUTERNAME
+"""
+
+_PS_UPLOAD_FILE = r"""
+param($destPath, $b64Content)
+$bytes = [Convert]::FromBase64String($b64Content)
+[IO.File]::WriteAllBytes($destPath, $bytes)
+"""
+
+
+# ─── Credential Verify ────────────────────────────────────────────────────────
+
+@router.post("/verify-credentials", status_code=200)
+async def verify_credentials(
+    body: CredentialVerifyRequest,
+    current_user=Depends(get_current_user),
+):
+    """
+    Test WinRM connectivity with the supplied credentials before registering.
+    Returns the remote hostname on success, raises 422 on failure.
+    """
+    if current_user.role not in ("super_admin", "cluster_admin"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    def _probe():
+        try:
+            from pypsrp.powershell import PowerShell, RunspacePool
+            from pypsrp.wsman import WSMan
+            wsman = WSMan(
+                body.hostname, username=body.username, password=body.password,
+                ssl=False, auth="negotiate", cert_validation=False,
+                connection_timeout=8,
+            )
+            with RunspacePool(wsman) as pool:
+                ps = PowerShell(pool)
+                ps.add_script(_PS_VERIFY_CREDS)
+                output = ps.invoke()
+                return "".join(str(o) for o in output).strip()
+        except ImportError:
+            # pypsrp not installed — mock success in dev
+            return body.hostname
+        except Exception as exc:
+            raise RuntimeError(str(exc))
+
+    loop = asyncio.get_event_loop()
+    try:
+        remote_name = await loop.run_in_executor(None, _probe)
+    except RuntimeError as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Cannot connect to '{body.hostname}': {exc}",
+        )
+
+    return {"ok": True, "remote_hostname": remote_name}
+
+
+# ─── ISO Browse ───────────────────────────────────────────────────────────────
+
+@router.get("/{hypervisor_id}/isos")
+async def list_isos(
+    hypervisor_id: str,
+    path: Optional[str] = None,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """List .iso files available on the Hyper-V host (default: C:\\ISOs)."""
+    h = await _get_or_404(db, hypervisor_id)
+    if not h.is_online:
+        raise HTTPException(409, "Server is marked offline")
+    result = await _run_ps(h.hostname, _PS_LIST_ISOS, {"path": path or ""})
+    if isinstance(result, dict):
+        result = [result]
+    elif not isinstance(result, list):
+        result = []
+    return result
+
+
+# ─── File Upload (stage onto host) ────────────────────────────────────────────
+
+@router.post("/{hypervisor_id}/upload")
+async def upload_file(
+    hypervisor_id: str,
+    dest_path: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Upload a file (e.g. ISO) to the Hyper-V host at dest_path.
+    Transferred as Base64 over WinRM — suitable for ISOs up to ~200 MB.
+    """
+    if current_user.role not in ("super_admin", "cluster_admin"):
+        raise HTTPException(403, "Insufficient permissions")
+    h = await _get_or_404(db, hypervisor_id)
+    if not h.is_online:
+        raise HTTPException(409, "Server is marked offline")
+
+    import base64
+    raw = await file.read()
+    b64 = base64.b64encode(raw).decode()
+    await _run_ps(h.hostname, _PS_UPLOAD_FILE, {"destPath": dest_path, "b64Content": b64})
+    return {"uploaded": True, "dest_path": dest_path, "size_bytes": len(raw)}
+
+
+# ─── Eject CD/DVD ─────────────────────────────────────────────────────────────
+
+@router.post("/{hypervisor_id}/vms/{vm_name}/eject-cd")
+async def eject_cd(
+    hypervisor_id: str,
+    vm_name: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """Unmount/eject the DVD drive ISO from a running VM."""
+    h = await _get_or_404(db, hypervisor_id)
+    await _run_ps(h.hostname, _PS_EJECT_DVD, {"vmName": vm_name})
+    await record_event(
+        db, "vm.eject_cd", "vm", f"{hypervisor_id}/{vm_name}", vm_name,
+        current_user.id, current_user.email, status="success",
+        ip_address=request.client.host if request.client else None,
+    )
+    return {"ejected": True, "vm": vm_name}
+
+
+# ─── Console Token (for WebSocket proxy) ─────────────────────────────────────
+
+@router.post("/{hypervisor_id}/vms/{vm_name}/console-token")
+async def get_console_token(
+    hypervisor_id: str,
+    vm_name: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Issue a short-lived (60s) token that the frontend WebSocket console can use
+    to identify which VM/host the session is for, without exposing credentials.
+    """
+    h = await _get_or_404(db, hypervisor_id)
+    token = secrets.token_urlsafe(32)
+    session_data = {
+        "hypervisor_id": hypervisor_id,
+        "hostname": h.hostname,
+        "vm_name": vm_name,
+        "user_id": current_user.id,
+    }
+    await cache_set(f"console_token:{token}", session_data, ttl=60)
+    return {"token": token, "ws_url": f"/api/v1/ws/console/{token}"}

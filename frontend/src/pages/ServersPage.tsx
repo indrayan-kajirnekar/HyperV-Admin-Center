@@ -275,10 +275,17 @@ function ServerFormModal({
   onClose: () => void
 }) {
   const qc = useQueryClient()
+
+  // For new registrations: 2-step flow — verify credentials first, then register
+  const [step, setStep] = useState<'verify' | 'register'>(existing ? 'register' : 'verify')
+  const [verifiedHost, setVerifiedHost] = useState(existing?.hostname ?? '')
+  const [creds, setCreds] = useState({ username: '', password: '' })
+  const [verifyError, setVerifyError] = useState('')
+
   const [form, setForm] = useState({
-    hostname:       existing?.hostname ?? '',
-    display_name:   existing?.display_name ?? '',
-    folder_id:      existing?.folder_id ?? '',
+    hostname:          existing?.hostname ?? '',
+    display_name:      existing?.display_name ?? '',
+    folder_id:         existing?.folder_id ?? '',
     total_cpu_cores:   existing?.total_cpu_cores ?? '',
     total_memory_gb:   existing?.total_memory_gb ?? '',
     total_storage_gb:  existing?.total_storage_gb ?? '',
@@ -288,15 +295,35 @@ function ServerFormModal({
   function set(k: string, v: unknown) { setForm((f) => ({ ...f, [k]: v })); setApiError('') }
   const numOrNull = (v: unknown) => (v === '' || v === null || v === undefined) ? null : Number(v)
 
+  // Step 1 — verify WinRM credentials
+  const verifyMut = useMutation({
+    mutationFn: () => serverApi.verifyCredentials({
+      hostname: form.hostname,
+      username: creds.username,
+      password: creds.password,
+    }),
+    onSuccess: (data: any) => {
+      setVerifiedHost(data.remote_hostname ?? form.hostname)
+      setVerifyError('')
+      setStep('register')
+    },
+    onError: (err: any) => {
+      setVerifyError(err?.response?.data?.detail ?? 'Connection failed. Check hostname and credentials.')
+    },
+  })
+
+  // Step 2 — register the server
   const mut = useMutation({
     mutationFn: () => {
       const body = {
-        hostname:        form.hostname,
-        display_name:    form.display_name || null,
-        folder_id:       form.folder_id || null,
+        hostname:          form.hostname,
+        display_name:      form.display_name || null,
+        folder_id:         form.folder_id || null,
         total_cpu_cores:   numOrNull(form.total_cpu_cores),
         total_memory_gb:   numOrNull(form.total_memory_gb),
         total_storage_gb:  numOrNull(form.total_storage_gb),
+        winrm_username:    creds.username || null,
+        winrm_password:    creds.password || null,
       }
       return existing
         ? serverApi.update(existing.id, body)
@@ -319,122 +346,145 @@ function ServerFormModal({
         style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
       >
         {/* Header */}
-        <div
-          className="flex items-center justify-between px-5 py-4 border-b"
-          style={{ borderColor: 'var(--border)' }}
-        >
+        <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
           <div className="flex items-center gap-2">
             <Server size={16} style={{ color: 'var(--accent)' }} />
             <h2 className="text-sm font-semibold" style={{ color: 'var(--text)' }}>
-              {existing ? 'Edit Server' : 'Register Hyper-V Server'}
+              {existing ? 'Edit Server' : step === 'verify' ? 'Verify Server Credentials' : 'Register Hyper-V Server'}
             </h2>
           </div>
           <button className="btn-ghost p-1.5" onClick={onClose}><X size={16} /></button>
         </div>
 
-        <div className="p-5 space-y-4">
-          {apiError && (
-            <div
-              className="rounded-md border p-3 text-xs"
-              style={{ borderColor: 'var(--danger)', background: 'rgba(220,38,38,0.08)', color: 'var(--danger)' }}
-            >
-              {apiError}
-            </div>
-          )}
+        {/* ── STEP 1: Credential Verification (new registrations only) ────── */}
+        {step === 'verify' && (
+          <>
+            <div className="p-5 space-y-4">
+              <div className="rounded-md border p-3 text-xs" style={{ borderColor: 'var(--border)', background: 'var(--surface-2)', color: 'var(--text-muted)' }}>
+                Credentials are verified via a live WinRM connection before the server is registered.
+                The server will not be added if the connection fails.
+              </div>
 
-          {/* Hostname */}
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
-              Hostname / IP Address <span style={{ color: 'var(--danger)' }}>*</span>
-            </label>
-            <input
-              className="input font-mono"
-              placeholder="host1.corp.local or 192.168.1.10"
-              value={form.hostname}
-              onChange={(e) => set('hostname', e.target.value)}
-              autoFocus={!existing}
-            />
-            <p className="text-xs mt-1" style={{ color: 'var(--text-muted)' }}>
-              Must be reachable via WinRM from the HyperVision backend.
-            </p>
-          </div>
+              {verifyError && (
+                <div className="rounded-md border p-3 text-xs" style={{ borderColor: 'var(--danger)', background: 'rgba(220,38,38,0.08)', color: 'var(--danger)' }}>
+                  {verifyError}
+                </div>
+              )}
 
-          {/* Display Name */}
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
-              Display Name <span style={{ color: 'var(--text-muted)' }}>(optional)</span>
-            </label>
-            <input
-              className="input"
-              placeholder="e.g. HV-Node-01"
-              value={form.display_name}
-              onChange={(e) => set('display_name', e.target.value)}
-            />
-          </div>
-
-          {/* Folder */}
-          <div>
-            <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
-              Assign to Folder
-            </label>
-            <select className="select" value={form.folder_id} onChange={(e) => set('folder_id', e.target.value)}>
-              <option value="">— Unassigned —</option>
-              {folders.map((f) => (
-                <option key={f.id} value={f.id}>{f.name}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Capacities */}
-          <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
-            <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--text-muted)' }}>
-              Physical Capacity <span className="normal-case font-normal">(optional — used for quota calculations)</span>
-            </p>
-            <div className="grid grid-cols-3 gap-3">
               <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>CPU Cores</label>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Hostname / IP Address <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
                 <input
-                  type="number" min={1} className="input"
-                  placeholder="e.g. 32"
-                  value={form.total_cpu_cores}
-                  onChange={(e) => set('total_cpu_cores', e.target.value)}
+                  className="input font-mono" placeholder="host1.corp.local or 192.168.1.10"
+                  value={form.hostname} autoFocus
+                  onChange={(e) => { set('hostname', e.target.value); setVerifyError('') }}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>RAM (GB)</label>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
+                  WinRM Username <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
                 <input
-                  type="number" min={0} step={1} className="input"
-                  placeholder="e.g. 256"
-                  value={form.total_memory_gb}
-                  onChange={(e) => set('total_memory_gb', e.target.value)}
+                  className="input font-mono" placeholder="DOMAIN\Administrator or .\Administrator"
+                  value={creds.username}
+                  onChange={(e) => { setCreds((c) => ({ ...c, username: e.target.value })); setVerifyError('') }}
                 />
               </div>
               <div>
-                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>Storage (GB)</label>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
+                  WinRM Password <span style={{ color: 'var(--danger)' }}>*</span>
+                </label>
                 <input
-                  type="number" min={0} step={1} className="input"
-                  placeholder="e.g. 4096"
-                  value={form.total_storage_gb}
-                  onChange={(e) => set('total_storage_gb', e.target.value)}
+                  type="password" className="input"
+                  value={creds.password}
+                  onChange={(e) => { setCreds((c) => ({ ...c, password: e.target.value })); setVerifyError('') }}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && form.hostname && creds.username && creds.password) verifyMut.mutate() }}
                 />
               </div>
             </div>
-          </div>
-        </div>
+            <div className="flex justify-end gap-2 px-5 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
+              <button className="btn-ghost" onClick={onClose}>Cancel</button>
+              <button
+                className="btn-primary"
+                disabled={!form.hostname.trim() || !creds.username || !creds.password || verifyMut.isPending}
+                onClick={() => verifyMut.mutate()}
+              >
+                {verifyMut.isPending ? 'Verifying…' : 'Verify & Continue'}
+              </button>
+            </div>
+          </>
+        )}
 
-        <div
-          className="flex justify-end gap-2 px-5 py-4 border-t"
-          style={{ borderColor: 'var(--border)' }}
-        >
-          <button className="btn-ghost" onClick={onClose}>Cancel</button>
-          <button
-            className="btn-primary"
-            disabled={!form.hostname.trim() || mut.isPending}
-            onClick={() => mut.mutate()}
-          >
-            {mut.isPending ? 'Saving…' : existing ? 'Save Changes' : 'Register Server'}
-          </button>
-        </div>
+        {/* ── STEP 2: Server Details ───────────────────────────────────────── */}
+        {step === 'register' && (
+          <>
+            <div className="p-5 space-y-4">
+              {!existing && (
+                <div className="rounded-md border p-2 text-xs flex items-center gap-2"
+                  style={{ borderColor: 'var(--success)', background: 'rgba(34,197,94,0.08)', color: 'var(--success)' }}>
+                  <span>✓</span>
+                  <span>Connected to <strong>{verifiedHost}</strong> — credentials verified</span>
+                </div>
+              )}
+              {apiError && (
+                <div className="rounded-md border p-3 text-xs" style={{ borderColor: 'var(--danger)', background: 'rgba(220,38,38,0.08)', color: 'var(--danger)' }}>
+                  {apiError}
+                </div>
+              )}
+
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>
+                  Display Name <span style={{ color: 'var(--text-muted)' }}>(optional)</span>
+                </label>
+                <input className="input" placeholder="e.g. HV-Node-01" value={form.display_name}
+                  onChange={(e) => set('display_name', e.target.value)} autoFocus />
+              </div>
+
+              <div>
+                <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>Assign to Folder</label>
+                <select className="select" value={form.folder_id} onChange={(e) => set('folder_id', e.target.value)}>
+                  <option value="">— Unassigned —</option>
+                  {folders.map((f) => <option key={f.id} value={f.id}>{f.name}</option>)}
+                </select>
+              </div>
+
+              <div className="border-t pt-4" style={{ borderColor: 'var(--border)' }}>
+                <p className="text-xs font-semibold uppercase tracking-wide mb-3" style={{ color: 'var(--text-muted)' }}>
+                  Physical Capacity <span className="normal-case font-normal">(optional)</span>
+                </p>
+                <div className="grid grid-cols-3 gap-3">
+                  {[
+                    { k: 'total_cpu_cores', label: 'CPU Cores', placeholder: '32' },
+                    { k: 'total_memory_gb', label: 'RAM (GB)',  placeholder: '256' },
+                    { k: 'total_storage_gb', label: 'Storage (GB)', placeholder: '4096' },
+                  ].map(({ k, label, placeholder }) => (
+                    <div key={k}>
+                      <label className="block text-xs font-medium mb-1" style={{ color: 'var(--text-muted)' }}>{label}</label>
+                      <input type="number" min={0} className="input" placeholder={placeholder}
+                        value={(form as any)[k]} onChange={(e) => set(k, e.target.value)} />
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div className="flex justify-between gap-2 px-5 py-4 border-t" style={{ borderColor: 'var(--border)' }}>
+              {!existing && (
+                <button className="btn-ghost text-xs" onClick={() => setStep('verify')}>← Back</button>
+              )}
+              <div className="flex gap-2 ml-auto">
+                <button className="btn-ghost" onClick={onClose}>Cancel</button>
+                <button
+                  className="btn-primary"
+                  disabled={mut.isPending}
+                  onClick={() => mut.mutate()}
+                >
+                  {mut.isPending ? 'Saving…' : existing ? 'Save Changes' : 'Register Server'}
+                </button>
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   )

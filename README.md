@@ -48,7 +48,7 @@ The frontend is a React + TypeScript SPA served by Nginx in production and by th
 | Backend    | Python 3.12, FastAPI, SQLAlchemy (async), Alembic    |
 | Database   | PostgreSQL 16                                        |
 | Cache      | Redis 7                                              |
-| Hyper-V    | WinRM / PowerShell Remoting (`pypsrp`, `aiowmi`)     |
+| Hyper-V    | WinRM / PowerShell Remoting (`pypsrp`)               |
 | Auth       | JWT (HS256, configurable expiry)                     |
 | Container  | Docker + Docker Compose                              |
 
@@ -56,12 +56,62 @@ The frontend is a React + TypeScript SPA served by Nginx in production and by th
 
 ## Prerequisites
 
-- [Docker Desktop](https://www.docker.com/products/docker-desktop/) (Docker Engine ≥ 24 + Compose v2)
+### Linux Server (running the app)
+- [Docker](https://docs.docker.com/engine/install/) Engine ≥ 24 + Compose v2
+- Ports **5173**, **8001**, **5433**, **6379** open in the firewall
 - For local dev without Docker:
   - Python 3.12+
-  - Node.js 20+ with npm / pnpm
+  - Node.js 20+ with npm
   - A running PostgreSQL 16 instance
   - A running Redis 7 instance
+
+### Hyper-V Windows Server (each host you want to manage)
+
+WinRM must be enabled and accessible from the Linux server. Run the following in **PowerShell as Administrator** on every Hyper-V host:
+
+**1. Enable PowerShell Remoting**
+```powershell
+Enable-PSRemoting -Force
+```
+
+**2. Allow Basic auth + unencrypted transport (HTTP/internal network)**
+```powershell
+winrm set winrm/config/service '@{AllowUnencrypted="true"}'
+winrm set winrm/config/service/auth '@{Basic="true"}'
+```
+
+**3. Ensure WinRM is listening on port 5985**
+```powershell
+winrm set winrm/config/listener?Address=*+Transport=HTTP '@{Port="5985"}'
+```
+
+**4. Open the firewall for port 5985**
+```powershell
+New-NetFirewallRule -DisplayName "WinRM HTTP" `
+  -Direction Inbound -Protocol TCP -LocalPort 5985 -Action Allow
+```
+
+**5. Add the service account to Hyper-V Administrators**
+```powershell
+Add-LocalGroupMember -Group "Hyper-V Administrators" -Member "svc-hypervision"
+```
+
+**6. Verify WinRM is ready**
+```powershell
+# Should return ProductVendor / ProductVersion info
+Test-WSMan localhost
+
+# Should show 0.0.0.0:5985 LISTENING
+netstat -an | findstr 5985
+```
+
+**7. Verify from the Linux server**
+```bash
+# Should return an XML response — not a timeout or refused
+curl -s http://<hyper-v-ip>:5985/wsman
+```
+
+> **Security note:** HTTP on port 5985 is acceptable on isolated internal networks. For production use HTTPS (port 5986) with a certificate.
 
 ---
 
@@ -258,9 +308,18 @@ On first startup the application bootstraps a super-admin account using the valu
 
 ## Port Reference
 
+### Application (Linux server)
+
 | Service         | Host Port | Container Port | Notes                          |
 |-----------------|-----------|----------------|--------------------------------|
 | Frontend (UI)   | **5173**  | 80             | Nginx in Docker; Vite in dev   |
-| Backend (API)   | 8000      | 8000           | FastAPI / uvicorn              |
-| PostgreSQL      | 5432      | 5432           | Exposed for local DB tooling   |
+| Backend (API)   | **8001**  | 8000           | FastAPI / uvicorn              |
+| PostgreSQL      | **5433**  | 5432           | Exposed for local DB tooling   |
 | Redis           | 6379      | 6379           | Exposed for local inspection   |
+
+### Hyper-V Windows Hosts
+
+| Service | Port | Notes                                    |
+|---------|------|------------------------------------------|
+| WinRM   | 5985 | HTTP — required for VM polling           |
+| WinRM   | 5986 | HTTPS — recommended for production       |

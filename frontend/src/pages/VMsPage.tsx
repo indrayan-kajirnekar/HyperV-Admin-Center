@@ -9,10 +9,11 @@ import { useState, useMemo, useRef, useCallback } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { vmApi } from '@/lib/api'
-import { Play, Square, RotateCcw, Trash2, Camera, Search, Plus, X } from 'lucide-react'
+import { Play, Square, RotateCcw, Trash2, Camera, Search, Plus, X, MonitorPlay, Disc } from 'lucide-react'
 import { clsx } from 'clsx'
 import CheckpointPanel from '@/components/vms/CheckpointPanel'
 import CreateVMModal from '@/components/vms/CreateVMModal'
+import ConsoleModal from '@/components/vms/ConsoleModal'
 import PageHeader from '@/components/shared/PageHeader'
 
 interface VM {
@@ -44,6 +45,7 @@ export default function VMsPage() {
   const [stateFilter, setStateFilter] = useState('All')
   const [selected, setSelected] = useState<VM | null>(null)
   const [checkpointVM, setCheckpointVM] = useState<VM | null>(null)
+  const [consoleVM, setConsoleVM] = useState<VM | null>(null)
   const [showCreate, setShowCreate] = useState(false)
   const [optimistic, setOptimistic] = useState<Record<string, string>>({})
   const parentRef = useRef<HTMLDivElement>(null)
@@ -87,6 +89,10 @@ export default function VMsPage() {
     mutationFn: (vm: VM) => vmApi.delete(vm.hypervisor_id, vm.Name),
     onMutate: (vm) => setOptimistic((p) => ({ ...p, [vm.Id]: 'Deleting…' })),
     onSettled: () => qc.invalidateQueries({ queryKey: ['vms'] }),
+  })
+
+  const ejectCDMut = useMutation({
+    mutationFn: (vm: VM) => vmApi.ejectCD(vm.hypervisor_id, vm.Name),
   })
 
   const states = useMemo(() => ['All', ...Array.from(new Set(vms.map((v) => v.State)))], [vms])
@@ -163,6 +169,8 @@ export default function VMsPage() {
                         onAction={(a) => actionMut.mutate({ vm, action: a })}
                         onDelete={() => deleteMut.mutate(vm)}
                         onCheckpoints={() => setCheckpointVM(vm)}
+                        onConsole={() => setConsoleVM(vm)}
+                        onEjectCD={() => ejectCDMut.mutate(vm)}
                       />
                     </span>
                   </div>
@@ -182,14 +190,29 @@ export default function VMsPage() {
         <CheckpointPanel vm={checkpointVM} onClose={() => setCheckpointVM(null)} />
       )}
 
+      {/* Console modal */}
+      {consoleVM && (
+        <ConsoleModal
+          vmName={consoleVM.Name}
+          hypervisorId={consoleVM.hypervisor_id}
+          onClose={() => setConsoleVM(null)}
+        />
+      )}
+
       {/* Create VM modal */}
       {showCreate && <CreateVMModal onClose={() => setShowCreate(false)} />}
     </div>
   )
 }
 
-function ActionBar({ vm, state, onAction, onDelete, onCheckpoints }:
-  { vm: VM; state: string; onAction: (a: string) => void; onDelete: () => void; onCheckpoints: () => void }) {
+function ActionBar({ vm, state, onAction, onDelete, onCheckpoints, onConsole, onEjectCD }: {
+  vm: VM; state: string
+  onAction: (a: string) => void
+  onDelete: () => void
+  onCheckpoints: () => void
+  onConsole: () => void
+  onEjectCD: () => void
+}) {
   const isRunning = state === 'Running'
   return (
     <div className="flex items-center gap-0.5">
@@ -205,6 +228,14 @@ function ActionBar({ vm, state, onAction, onDelete, onCheckpoints }:
           </button>
           <button className="btn-ghost p-1.5 text-xs" title="Restart" onClick={() => onAction('restart')}>
             <RotateCcw size={13} style={{ color: 'var(--accent)' }} />
+          </button>
+          <button className="btn-ghost p-1.5 text-xs" title="Open Console" onClick={onConsole}>
+            <MonitorPlay size={13} style={{ color: 'var(--accent)' }} />
+          </button>
+          <button className="btn-ghost p-1.5 text-xs" title="Eject CD/DVD" onClick={() => {
+            if (confirm(`Eject ISO/DVD from "${vm.Name}"?`)) onEjectCD()
+          }}>
+            <Disc size={13} style={{ color: 'var(--text-muted)' }} />
           </button>
         </>
       )}

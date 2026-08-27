@@ -29,6 +29,9 @@ router = APIRouter(prefix="/vms", tags=["vms"])
 class VMActionRequest(BaseModel):
     action: str = Field(..., description="start | stop | stop_graceful | restart | suspend | resume")
 
+class NICConfig(BaseModel):
+    switch_name: str = Field(..., min_length=1)
+
 class CreateVMRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=100)
     hypervisor_id: str
@@ -38,6 +41,9 @@ class CreateVMRequest(BaseModel):
     disk_gb: float = Field(40.0, ge=1.0, le=65536.0)
     switch_name: str = "Default Switch"
     generation: int = Field(2, ge=1, le=2)
+    iso_path: Optional[str] = None          # path on the host, e.g. C:\ISOs\ubuntu.iso
+    nic2_switch: Optional[str] = None       # 2nd NIC virtual switch name
+    nic3_switch: Optional[str] = None       # 3rd NIC virtual switch name
 
 class CreateCheckpointRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
@@ -152,6 +158,9 @@ async def create_vm_endpoint(
     result = await create_vm(
         hostname, body.name, body.memory_gb, body.cpu_count,
         body.disk_gb, body.switch_name, body.generation,
+        iso_path=body.iso_path,
+        nic2_switch=body.nic2_switch,
+        nic3_switch=body.nic3_switch,
     )
     await record_event(
         db, action="vm.create", resource_type="vm", resource_name=body.name,

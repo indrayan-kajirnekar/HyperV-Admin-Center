@@ -82,11 +82,28 @@ Stop-VM -Name $vmName -Force -ErrorAction SilentlyContinue
 Remove-VM -Name $vmName -Force
 """
 
-_PS_CREATE_VM = """
-param($name, $memoryGB, $cpuCount, $diskGB, $switchName, $generation)
+_PS_CREATE_VM = r"""
+param($name, $memoryGB, $cpuCount, $diskGB, $switchName, $generation, $isoPath, $nic2Switch, $nic3Switch)
 $memBytes = [long]($memoryGB * 1GB)
-$vm = New-VM -Name $name -MemoryStartupBytes $memBytes -Generation $generation -NewVHDSizeBytes ([long]($diskGB * 1GB)) -NewVHDPath "C:\\VMs\\$name\\$name.vhdx" -SwitchName $switchName
+$vhdPath = "C:\VMs\$name\$name.vhdx"
+New-Item -ItemType Directory -Path "C:\VMs\$name" -Force | Out-Null
+$vm = New-VM -Name $name -MemoryStartupBytes $memBytes -Generation $generation `
+      -NewVHDSizeBytes ([long]($diskGB * 1GB)) -NewVHDPath $vhdPath -SwitchName $switchName
 Set-VMProcessor $vm -Count $cpuCount
+# Attach ISO if provided
+if ($isoPath) {
+    if ($generation -eq 2) {
+        Add-VMDvdDrive -VMName $name -Path $isoPath
+        $dvd = Get-VMDvdDrive -VMName $name
+        $hdd = Get-VMHardDiskDrive -VMName $name
+        Set-VMFirmware -VMName $name -BootOrder $dvd, $hdd
+    } else {
+        Set-VMDvdDrive -VMName $name -Path $isoPath
+    }
+}
+# Additional NICs
+if ($nic2Switch) { Add-VMNetworkAdapter -VMName $name -SwitchName $nic2Switch }
+if ($nic3Switch) { Add-VMNetworkAdapter -VMName $name -SwitchName $nic3Switch }
 $vm | Select-Object Name, Id, State | ConvertTo-Json
 """
 
@@ -213,11 +230,18 @@ async def create_vm(
     disk_gb: float,
     switch_name: str,
     generation: int = 2,
+    iso_path: Optional[str] = None,
+    nic2_switch: Optional[str] = None,
+    nic3_switch: Optional[str] = None,
 ) -> Dict:
     result = await _run_ps(
         hostname, _PS_CREATE_VM,
-        {"name": name, "memoryGB": memory_gb, "cpuCount": cpu_count,
-         "diskGB": disk_gb, "switchName": switch_name, "generation": generation},
+        {
+            "name": name, "memoryGB": memory_gb, "cpuCount": cpu_count,
+            "diskGB": disk_gb, "switchName": switch_name, "generation": generation,
+            "isoPath": iso_path or "", "nic2Switch": nic2_switch or "",
+            "nic3Switch": nic3_switch or "",
+        },
     )
     await cache_delete_pattern("vms:*")
     return result if isinstance(result, dict) else {}
