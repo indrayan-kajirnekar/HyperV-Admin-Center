@@ -113,7 +113,7 @@ export default function UsersPage() {
         )}
 
         {/* ── Groups Tab ─────────────────────────────────── */}
-        {tab === 'groups' && <GroupsTab groups={groups} users={users} />}
+        {tab === 'groups' && <GroupsTab groups={groups} />}
 
         {/* ── Permissions Tab ────────────────────────────── */}
         {tab === 'permissions' && <PermissionsTab users={users} groups={groups} />}
@@ -125,7 +125,7 @@ export default function UsersPage() {
   )
 }
 
-function GroupsTab({ groups, users }: { groups: any[]; users: any[] }) {
+function GroupsTab({ groups }: { groups: any[] }) {
   const qc = useQueryClient()
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [showCreate, setShowCreate] = useState(false)
@@ -193,7 +193,6 @@ function GroupCreateInline({ onSave, onCancel }: { onSave: (n: string, d: string
 }
 
 function PermissionsTab({ users, groups }: { users: any[]; groups: any[] }) {
-  const qc = useQueryClient()
   const { data: folders = [] } = useQuery({ queryKey: ['folders'], queryFn: folderApi.list })
   const { data: hypervisors = [] } = useQuery({ queryKey: ['hypervisors'], queryFn: folderApi.hypervisors })
 

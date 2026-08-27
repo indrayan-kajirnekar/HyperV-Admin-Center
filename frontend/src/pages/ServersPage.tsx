@@ -11,7 +11,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { serverApi, folderApi } from '@/lib/api'
 import {
   Server, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
-  Search, X, CheckCircle, XCircle, Cpu,
+  Search, X, Cpu,
 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 
