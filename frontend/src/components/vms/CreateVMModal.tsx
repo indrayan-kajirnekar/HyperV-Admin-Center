@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { vmApi, folderApi, serverApi } from '@/lib/api'
-import { X, Disc, Plus, Trash2, HardDrive } from 'lucide-react'
+import { X, Disc, Plus, Trash2 } from 'lucide-react'
 
 interface Props { onClose: () => void }
 
