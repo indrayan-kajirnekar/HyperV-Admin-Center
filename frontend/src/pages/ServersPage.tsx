@@ -8,7 +8,7 @@
  */
 import { useState, useMemo } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { serverApi, folderApi } from '@/lib/api'
+import { serverApi, folderApi, vmApi } from '@/lib/api'
 import {
   Server, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
   Search, X, Cpu, FolderPlus, ChevronDown, ChevronRight,
@@ -188,9 +188,10 @@ export default function ServersPage() {
                 </p>
                 <p className="text-xs font-mono truncate" style={{ color: 'var(--text-muted)' }}>
                   {s.display_name ? s.hostname : ''}
-                  {s.winrm_username ? ` · ${s.winrm_username}` : !s.has_credentials
-                    ? <span style={{ color: 'var(--danger)' }}> ⚠ no credentials stored</span>
-                    : ''}
+                  {s.winrm_username ? ` · ${s.winrm_username}` : ''}
+                  {!s.has_credentials && !s.winrm_username
+                    ? <span className="ml-1" style={{ color: 'var(--danger)' }}>⚠ no credentials</span>
+                    : null}
                 </p>
               </div>
 
@@ -279,6 +280,7 @@ function ServerDetailPanel({ server }: { server: HypervisorRecord }) {
 
   const { data: vms = [], isLoading: vmsLoading } = useQuery<VMInfo[]>({
     queryKey: ['vms'],
+    queryFn: vmApi.list,
     staleTime: 15_000,
   })
 
