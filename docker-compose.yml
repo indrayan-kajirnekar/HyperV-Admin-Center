@@ -37,10 +37,28 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
-    env_file: ./backend/.env
+    env_file:
+      - path: ./backend/.env
+        required: false          # start without .env; values below are used as defaults
     environment:
+      APP_NAME: HyperVision
+      APP_ENV: production
+      APP_SECRET_KEY: change-me-to-a-secure-random-256-bit-key
+      APP_DEBUG: "false"
+      APP_PORT: "8000"
       DATABASE_URL: postgresql+asyncpg://hypervision:password@postgres:5432/hypervision
       REDIS_URL: redis://redis:6379/0
+      REDIS_TTL_SECONDS: "30"
+      REDIS_VM_POLL_INTERVAL: "15"
+      JWT_ALGORITHM: HS256
+      JWT_EXPIRE_MINUTES: "480"
+      HYPERV_HOSTS: ""
+      HYPERV_USERNAME: ""
+      HYPERV_PASSWORD: ""
+      CORS_ORIGINS: "http://localhost:5173"
+      BOOTSTRAP_ADMIN_EMAIL: admin@corp.local
+      BOOTSTRAP_ADMIN_PASSWORD: ChangeMe@123
+      BOOTSTRAP_ADMIN_NAME: Admin
     ports:
       - "8000:8000"
     depends_on:
