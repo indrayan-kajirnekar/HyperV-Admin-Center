@@ -27,7 +27,7 @@ class Settings(BaseSettings):
     HYPERV_USERNAME: str = ""
     HYPERV_PASSWORD: str = ""
 
-    CORS_ORIGINS: str = "http://localhost:3000"
+    CORS_ORIGINS: str = "http://localhost:5173"
 
     BOOTSTRAP_ADMIN_EMAIL: str = "indrayan@corp.local"
     BOOTSTRAP_ADMIN_PASSWORD: str = "Indrayan@123pswd"
