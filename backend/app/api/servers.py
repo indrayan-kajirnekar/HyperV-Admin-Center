@@ -28,6 +28,7 @@ from app.core.cache import cache_get, cache_set
 from app.models.folder import Hypervisor, Folder
 from app.services.audit_service import record_event
 from app.services.hyperv_service import _run_ps
+from sqlalchemy import select as sa_select
 
 router = APIRouter(prefix="/servers", tags=["servers"])
 
@@ -291,6 +292,16 @@ $bytes = [Convert]::FromBase64String($b64Content)
 [IO.File]::WriteAllBytes($destPath, $bytes)
 """
 
+_PS_LIST_VM_GROUPS = r"""
+$groups = Get-VMGroup -ErrorAction SilentlyContinue
+if (-not $groups) { Write-Output '[]'; return }
+$groups | Select-Object Name,
+    @{N='Id';   E={$_.Id.ToString()}},
+    @{N='Type'; E={$_.GroupType.ToString()}},
+    @{N='VMCount'; E={@($_.VMMembers).Count}} |
+    ConvertTo-Json -Depth 2
+"""
+
 
 # ─── Credential Verify ────────────────────────────────────────────────────────
 
@@ -475,3 +486,102 @@ async def get_console_token(
     }
     await cache_set(f"console_token:{token}", session_data, ttl=60)
     return {"token": token, "ws_url": f"/api/v1/ws/console/{token}"}
+
+
+# ─── VM Groups (fetch from Hyper-V host) ─────────────────────────────────────
+
+@router.get("/{hypervisor_id}/vm-groups")
+async def list_vm_groups(
+    hypervisor_id: str,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Fetch VM Groups defined on the Hyper-V host via Get-VMGroup.
+    Returns list of { Name, Id, Type, VMCount }.
+    """
+    h = await _get_or_404(db, hypervisor_id)
+    if not h.is_online:
+        raise HTTPException(409, "Server is marked offline")
+    result = await _run_ps(h.hostname, _PS_LIST_VM_GROUPS)
+    if isinstance(result, dict):
+        result = [result]
+    elif not isinstance(result, list):
+        result = []
+    return result
+
+
+@router.post("/{hypervisor_id}/sync-folders", status_code=200)
+async def sync_folders_from_host(
+    hypervisor_id: str,
+    request: Request,
+    db: AsyncSession = Depends(get_db),
+    current_user=Depends(get_current_user),
+):
+    """
+    Pull VM Groups from the Hyper-V host and upsert them as Folders in the DB.
+    - New groups  → new Folder rows created
+    - Existing folders (matched by name) → left unchanged
+    - The hypervisor is assigned to each synced folder automatically
+    Returns { created: [...], existing: [...] }
+    """
+    if current_user.role not in ("super_admin", "cluster_admin"):
+        raise HTTPException(403, "Insufficient permissions")
+
+    h = await _get_or_404(db, hypervisor_id)
+    if not h.is_online:
+        raise HTTPException(409, "Server is marked offline")
+
+    # 1. Fetch VM groups from host
+    raw = await _run_ps(h.hostname, _PS_LIST_VM_GROUPS)
+    if isinstance(raw, dict):
+        raw = [raw]
+    elif not isinstance(raw, list):
+        raw = []
+
+    if not raw:
+        return {"created": [], "existing": [], "message": "No VM Groups found on host. Create VM Groups in Hyper-V Manager first."}
+
+    # 2. Load all existing folders by name for fast lookup
+    existing_res = await db.execute(sa_select(Folder))
+    existing_folders = {f.name: f for f in existing_res.scalars().all()}
+
+    created = []
+    existing_names = []
+
+    for group in raw:
+        name = group.get("Name", "").strip()
+        if not name:
+            continue
+
+        if name in existing_folders:
+            # Already exists — just ensure this hypervisor is assigned to it
+            folder = existing_folders[name]
+            existing_names.append(name)
+        else:
+            # Create new folder
+            folder = Folder(
+                name=name,
+                description=f"Synced from Hyper-V VM Group on {h.hostname}",
+            )
+            db.add(folder)
+            await db.flush()   # get the folder.id
+            existing_folders[name] = folder
+            created.append(name)
+
+        # Assign this hypervisor to the folder if not already assigned
+        if h.folder_id != folder.id:
+            h.folder_id = folder.id
+
+    await record_event(
+        db, "folder.sync", "hypervisor", h.id, h.hostname,
+        current_user.id, current_user.email, status="success",
+        detail={"created": created, "existing": existing_names},
+        ip_address=request.client.host if request.client else None,
+    )
+
+    return {
+        "created": created,
+        "existing": existing_names,
+        "message": f"Sync complete. {len(created)} new folder(s) created, {len(existing_names)} already existed.",
+    }

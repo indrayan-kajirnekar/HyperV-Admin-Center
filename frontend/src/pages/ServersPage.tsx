@@ -11,7 +11,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { serverApi, folderApi } from '@/lib/api'
 import {
   Server, Plus, Pencil, Trash2, ToggleLeft, ToggleRight,
-  Search, X, Cpu,
+  Search, X, Cpu, RefreshCw,
 } from 'lucide-react'
 import PageHeader from '@/components/shared/PageHeader'
 
@@ -60,6 +60,18 @@ export default function ServersPage() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['servers'] })
       qc.invalidateQueries({ queryKey: ['hypervisors'] })
+    },
+  })
+
+  const syncMut = useMutation({
+    mutationFn: (id: string) => serverApi.syncFolders(id),
+    onSuccess: (data: any) => {
+      qc.invalidateQueries({ queryKey: ['servers'] })
+      qc.invalidateQueries({ queryKey: ['folders'] })
+      alert(data?.message ?? 'Sync complete.')
+    },
+    onError: (err: any) => {
+      alert(err?.response?.data?.detail ?? 'Sync failed.')
     },
   })
 
@@ -231,6 +243,19 @@ export default function ServersPage() {
                 {s.is_online
                   ? <ToggleRight size={16} style={{ color: 'var(--success)' }} />
                   : <ToggleLeft size={16} style={{ color: 'var(--text-muted)' }} />}
+              </button>
+              <button
+                className="btn-ghost p-1.5"
+                title="Sync VM Groups as Folders from this host"
+                onClick={() => {
+                  if (confirm(`Sync VM Groups from "${s.display_name ?? s.hostname}" as Folders?\nNew groups will be created as folders and this server will be assigned to them.`)) {
+                    syncMut.mutate(s.id)
+                  }
+                }}
+                disabled={syncMut.isPending || !s.is_online}
+              >
+                <RefreshCw size={13} style={{ color: 'var(--accent)' }}
+                  className={syncMut.isPending ? 'animate-spin' : ''} />
               </button>
               <button
                 className="btn-ghost p-1.5" title="Edit server"

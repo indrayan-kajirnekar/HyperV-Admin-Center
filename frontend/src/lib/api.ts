@@ -83,6 +83,10 @@ export const serverApi = {
                       api.get(`/servers/${id}/drives`).then((r) => r.data),
   listISOs:         (id: string, path?: string) =>
                       api.get(`/servers/${id}/isos`, { params: path ? { path } : {} }).then((r) => r.data),
+  listVMGroups:     (id: string) =>
+                      api.get(`/servers/${id}/vm-groups`).then((r) => r.data),
+  syncFolders:      (id: string) =>
+                      api.post(`/servers/${id}/sync-folders`).then((r) => r.data),
   uploadFile:       (id: string, destPath: string, file: File) => {
     const fd = new FormData(); fd.append('file', file)
     return api.post(`/servers/${id}/upload`, fd, {
