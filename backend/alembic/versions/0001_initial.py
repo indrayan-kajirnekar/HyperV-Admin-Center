@@ -14,82 +14,107 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_table(
-        'users',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('email', sa.String(255), nullable=False, unique=True, index=True),
-        sa.Column('full_name', sa.String(255), nullable=False),
-        sa.Column('hashed_password', sa.String(255), nullable=False),
-        sa.Column('role', sa.String(50), nullable=False, server_default='read_only'),
-        sa.Column('is_active', sa.Boolean, server_default='true'),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-    op.create_table(
-        'groups',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('name', sa.String(255), nullable=False, unique=True),
-        sa.Column('description', sa.String(512)),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-    op.create_table(
-        'user_group_members',
-        sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
-        sa.Column('group_id', sa.String(36), sa.ForeignKey('groups.id', ondelete='CASCADE'), primary_key=True),
-    )
-    op.create_table(
-        'permissions',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=True),
-        sa.Column('group_id', sa.String(36), sa.ForeignKey('groups.id', ondelete='CASCADE'), nullable=True),
-        sa.Column('resource_type', sa.String(50), nullable=False),
-        sa.Column('resource_id', sa.String(36), nullable=False),
-        sa.Column('role', sa.String(50), nullable=False),
-    )
-    op.create_table(
-        'folders',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('name', sa.String(255), nullable=False),
-        sa.Column('parent_id', sa.String(36), sa.ForeignKey('folders.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('description', sa.String(512)),
-        sa.Column('quota_storage_gb', sa.Float, nullable=True),
-        sa.Column('quota_memory_gb', sa.Float, nullable=True),
-        sa.Column('quota_cpu_pct', sa.Float, nullable=True),
-        sa.Column('quota_max_vms', sa.Integer, nullable=True),
-        sa.Column('soft_quota_storage_gb', sa.Float, nullable=True),
-        sa.Column('soft_quota_memory_gb', sa.Float, nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-    op.create_table(
-        'hypervisors',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('hostname', sa.String(255), nullable=False, unique=True),
-        sa.Column('display_name', sa.String(255), nullable=True),
-        sa.Column('folder_id', sa.String(36), sa.ForeignKey('folders.id', ondelete='SET NULL'), nullable=True),
-        sa.Column('is_online', sa.Boolean, server_default='true'),
-        sa.Column('total_cpu_cores', sa.Integer, nullable=True),
-        sa.Column('total_memory_gb', sa.Float, nullable=True),
-        sa.Column('total_storage_gb', sa.Float, nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
-        sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=True),
-    )
-    op.create_table(
-        'audit_logs',
-        sa.Column('id', sa.String(36), primary_key=True),
-        sa.Column('user_id', sa.String(36), nullable=True),
-        sa.Column('user_email', sa.String(255), nullable=True),
-        sa.Column('action', sa.String(100), nullable=False),
-        sa.Column('resource_type', sa.String(50), nullable=False),
-        sa.Column('resource_id', sa.String(255), nullable=True),
-        sa.Column('resource_name', sa.String(255), nullable=True),
-        sa.Column('detail', sa.Text, nullable=True),
-        sa.Column('status', sa.String(20), server_default='success'),
-        sa.Column('ip_address', sa.String(45), nullable=True),
-        sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
-    )
-    op.create_index('ix_audit_logs_created_at', 'audit_logs', ['created_at'])
-    op.create_index('ix_audit_logs_user_id', 'audit_logs', ['user_id'])
-    op.create_index('ix_audit_logs_resource_type', 'audit_logs', ['resource_type'])
+    bind = op.get_bind()
+
+    def table_exists(name: str) -> bool:
+        return bind.dialect.has_table(bind, name)
+
+    def index_exists(name: str) -> bool:
+        result = bind.execute(
+            sa.text("SELECT 1 FROM pg_indexes WHERE indexname = :n"),
+            {"n": name},
+        )
+        return result.fetchone() is not None
+
+    # ── tables ─────────────────────────────────────────────────────────────────
+    if not table_exists('users'):
+        op.create_table(
+            'users',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('email', sa.String(255), nullable=False, unique=True, index=True),
+            sa.Column('full_name', sa.String(255), nullable=False),
+            sa.Column('hashed_password', sa.String(255), nullable=False),
+            sa.Column('role', sa.String(50), nullable=False, server_default='read_only'),
+            sa.Column('is_active', sa.Boolean, server_default='true'),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+            sa.Column('updated_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+        )
+    if not table_exists('groups'):
+        op.create_table(
+            'groups',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('name', sa.String(255), nullable=False, unique=True),
+            sa.Column('description', sa.String(512)),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+        )
+    if not table_exists('user_group_members'):
+        op.create_table(
+            'user_group_members',
+            sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id', ondelete='CASCADE'), primary_key=True),
+            sa.Column('group_id', sa.String(36), sa.ForeignKey('groups.id', ondelete='CASCADE'), primary_key=True),
+        )
+    if not table_exists('permissions'):
+        op.create_table(
+            'permissions',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('user_id', sa.String(36), sa.ForeignKey('users.id', ondelete='CASCADE'), nullable=True),
+            sa.Column('group_id', sa.String(36), sa.ForeignKey('groups.id', ondelete='CASCADE'), nullable=True),
+            sa.Column('resource_type', sa.String(50), nullable=False),
+            sa.Column('resource_id', sa.String(36), nullable=False),
+            sa.Column('role', sa.String(50), nullable=False),
+        )
+    if not table_exists('folders'):
+        op.create_table(
+            'folders',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('name', sa.String(255), nullable=False),
+            sa.Column('parent_id', sa.String(36), sa.ForeignKey('folders.id', ondelete='SET NULL'), nullable=True),
+            sa.Column('description', sa.String(512)),
+            sa.Column('quota_storage_gb', sa.Float, nullable=True),
+            sa.Column('quota_memory_gb', sa.Float, nullable=True),
+            sa.Column('quota_cpu_pct', sa.Float, nullable=True),
+            sa.Column('quota_max_vms', sa.Integer, nullable=True),
+            sa.Column('soft_quota_storage_gb', sa.Float, nullable=True),
+            sa.Column('soft_quota_memory_gb', sa.Float, nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+        )
+    if not table_exists('hypervisors'):
+        op.create_table(
+            'hypervisors',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('hostname', sa.String(255), nullable=False, unique=True),
+            sa.Column('display_name', sa.String(255), nullable=True),
+            sa.Column('folder_id', sa.String(36), sa.ForeignKey('folders.id', ondelete='SET NULL'), nullable=True),
+            sa.Column('is_online', sa.Boolean, server_default='true'),
+            sa.Column('total_cpu_cores', sa.Integer, nullable=True),
+            sa.Column('total_memory_gb', sa.Float, nullable=True),
+            sa.Column('total_storage_gb', sa.Float, nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now()),
+            sa.Column('last_seen_at', sa.DateTime(timezone=True), nullable=True),
+        )
+    if not table_exists('audit_logs'):
+        op.create_table(
+            'audit_logs',
+            sa.Column('id', sa.String(36), primary_key=True),
+            sa.Column('user_id', sa.String(36), nullable=True),
+            sa.Column('user_email', sa.String(255), nullable=True),
+            sa.Column('action', sa.String(100), nullable=False),
+            sa.Column('resource_type', sa.String(50), nullable=False),
+            sa.Column('resource_id', sa.String(255), nullable=True),
+            sa.Column('resource_name', sa.String(255), nullable=True),
+            sa.Column('detail', sa.Text, nullable=True),
+            sa.Column('status', sa.String(20), server_default='success'),
+            sa.Column('ip_address', sa.String(45), nullable=True),
+            sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), index=True),
+        )
+
+    # ── indexes ────────────────────────────────────────────────────────────────
+    if not index_exists('ix_audit_logs_created_at'):
+        op.create_index('ix_audit_logs_created_at', 'audit_logs', ['created_at'])
+    if not index_exists('ix_audit_logs_user_id'):
+        op.create_index('ix_audit_logs_user_id', 'audit_logs', ['user_id'])
+    if not index_exists('ix_audit_logs_resource_type'):
+        op.create_index('ix_audit_logs_resource_type', 'audit_logs', ['resource_type'])
 
 
 def downgrade() -> None:
