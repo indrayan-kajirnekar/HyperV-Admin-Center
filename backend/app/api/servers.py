@@ -144,7 +144,8 @@ async def register_server(
     if existing.scalar_one_or_none():
         raise HTTPException(409, f"A server with hostname '{body.hostname}' is already registered.")
 
-    h = Hypervisor(**body.model_dump())
+    # Exclude credential fields — they are not stored in the Hypervisor model
+    h = Hypervisor(**body.model_dump(exclude={"winrm_username", "winrm_password"}))
     db.add(h)
     await db.flush()
     await record_event(
