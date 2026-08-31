@@ -7,9 +7,9 @@ const WS_URL = `${window.location.protocol === 'https:' ? 'wss' : 'ws'}://${wind
 
 let reconnectTimer: ReturnType<typeof setTimeout> | null = null
 
-export function useWebSocket() {
+export function useWebSocket(): { connected: boolean } {
   const ws = useRef<WebSocket | null>(null)
-  const { push, setConnected } = useEventBus()
+  const { push, setConnected, connected } = useEventBus()
   const token = useAuthStore((s) => s.token)
   const queryClient = useQueryClient()
 
@@ -52,4 +52,6 @@ export function useWebSocket() {
       ws.current?.close()
     }
   }, [token]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  return { connected }
 }

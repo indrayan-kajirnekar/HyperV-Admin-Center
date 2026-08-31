@@ -4,6 +4,7 @@ import { useThemeStore } from '@/stores/themeStore'
 import { useEffect } from 'react'
 import AppShell from '@/components/layout/AppShell'
 import LoginPage from '@/pages/LoginPage'
+import DashboardPage from '@/pages/DashboardPage'
 import VMsPage from '@/pages/VMsPage'
 import ServersPage from '@/pages/ServersPage'
 import FoldersPage from '@/pages/FoldersPage'
@@ -34,7 +35,7 @@ export default function App() {
             </RequireAuth>
           }
         >
-          <Route index element={<Navigate to="/vms" replace />} />
+          <Route index element={<DashboardPage />} />
           <Route path="vms" element={<VMsPage />} />
           <Route path="servers" element={<ServersPage />} />
           <Route path="folders" element={<FoldersPage />} />

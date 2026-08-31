@@ -1,110 +1,118 @@
-import { useState } from 'react'
 import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useThemeStore } from '@/stores/themeStore'
 import { useWebSocket } from '@/hooks/useWebSocket'
-import { useEventBus } from '@/stores/eventBusStore'
-import {
-  Server, FolderOpen, Users, ClipboardList,
-  Sun, Moon, LogOut, WifiOff, Cpu, KeyRound,
-} from 'lucide-react'
+import { useState } from 'react'
 import ChangePasswordModal from '@/components/auth/ChangePasswordModal'
+import {
+  LayoutDashboard, Monitor, Server, FolderOpen,
+  Users, ClipboardList, Sun, Moon, KeyRound,
+  LogOut, Wifi, WifiOff, ChevronRight,
+} from 'lucide-react'
 
 const NAV = [
-  { to: '/vms',     label: 'Virtual Machines', icon: Cpu },
-  { to: '/servers', label: 'Servers',           icon: Server },
-  { to: '/folders', label: 'Folders & Quotas',  icon: FolderOpen },
-  { to: '/users',   label: 'Users & Groups',    icon: Users },
-  { to: '/audit',   label: 'Audit Log',         icon: ClipboardList },
+  { to: '/',        label: 'Overview',      icon: LayoutDashboard, end: true },
+  { to: '/vms',     label: 'Virtual Machines', icon: Monitor },
+  { to: '/servers', label: 'Servers',        icon: Server },
+  { to: '/folders', label: 'Folders & Quotas', icon: FolderOpen },
+  { to: '/users',   label: 'Users & Groups', icon: Users },
+  { to: '/audit',   label: 'Audit Log',      icon: ClipboardList },
 ]
 
 export default function AppShell() {
-  useWebSocket()
-  const { fullName, email, role, logout } = useAuthStore()
-  const { theme, toggle } = useThemeStore()
-  const navigate = useNavigate()
-  const connected = useEventBus((s) => s.connected)
-  const [showChangePassword, setShowChangePassword] = useState(false)
+  const { email, fullName, role, logout } = useAuthStore()
+  const { theme, toggle }                 = useThemeStore()
+  const { connected }                     = useWebSocket()
+  const navigate                          = useNavigate()
+  const [showPwd, setShowPwd]             = useState(false)
 
-  function handleLogout() {
-    logout()
-    navigate('/login')
-  }
+  function handleLogout() { logout(); navigate('/login') }
+
+  const initials = (fullName ?? email ?? 'A')
+    .split(' ').map(w => w[0]?.toUpperCase() ?? '').slice(0, 2).join('')
 
   return (
-    <div className="flex h-screen overflow-hidden" style={{ background: 'var(--bg)' }}>
-      {/* ── Sidebar ─────────────────────────────────────────────────────── */}
-      <aside
-        className="flex w-56 flex-shrink-0 flex-col border-r"
-        style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-      >
+    <div className="flex h-full overflow-hidden">
+
+      {/* ── Sidebar ──────────────────────────────────────────────────────── */}
+      <aside className="flex flex-col w-56 shrink-0 h-full overflow-hidden"
+        style={{ background: 'var(--sidebar-bg)', borderRight: '1px solid rgba(255,255,255,0.06)' }}>
+
         {/* Brand */}
-        <div className="flex items-center gap-2.5 px-4 py-4 border-b" style={{ borderColor: 'var(--border)' }}>
-          <Server size={20} style={{ color: 'var(--accent)' }} strokeWidth={1.8} />
-          <span className="text-sm font-bold tracking-tight" style={{ color: 'var(--text)' }}>
-            Hyper<span style={{ color: 'var(--accent)' }}>Vision</span>
-          </span>
+        <div className="flex items-center gap-2.5 px-4 h-14 shrink-0 border-b"
+          style={{ borderColor: 'rgba(255,255,255,0.08)' }}>
+          <div className="w-7 h-7 rounded flex items-center justify-center shrink-0"
+            style={{ background: 'var(--accent)' }}>
+            <Server size={14} color="#fff" />
+          </div>
+          <div>
+            <span className="text-sm font-bold text-white">HyperVision</span>
+            <p className="text-xs" style={{ color: 'var(--sidebar-text)', opacity: 0.6 }}>Admin Center</p>
+          </div>
         </div>
 
         {/* Nav */}
-        <nav className="flex-1 space-y-0.5 p-2 pt-3">
-          {NAV.map(({ to, label, icon: Icon }) => (
-            <NavLink key={to} to={to}>
+        <nav className="flex-1 overflow-y-auto py-3">
+          <p className="sidebar-section">Navigation</p>
+          {NAV.map(({ to, label, icon: Icon, end }) => (
+            <NavLink key={to} to={to} end={end}
+              className={({ isActive }) =>
+                `sidebar-item ${isActive ? 'sidebar-item-active' : ''}`}>
               {({ isActive }) => (
-                <span className={isActive ? 'sidebar-item-active' : 'sidebar-item'}>
-                  <Icon size={16} strokeWidth={1.8} />
-                  {label}
-                </span>
+                <>
+                  <Icon size={16} className="shrink-0" />
+                  <span className="flex-1 text-sm">{label}</span>
+                  {isActive && <ChevronRight size={13} style={{ opacity: 0.5 }} />}
+                </>
               )}
             </NavLink>
           ))}
         </nav>
 
-        {/* Footer */}
-        <div className="border-t p-3 space-y-2" style={{ borderColor: 'var(--border)' }}>
-          {/* WS status */}
-          <div className="flex items-center gap-1.5 px-1 text-xs" style={{ color: 'var(--text-muted)' }}>
-            {connected
-              ? <><span className="pulse-live" /><span>Live</span></>
-              : <><WifiOff size={12} /><span>Reconnecting…</span></>
-            }
+        {/* Connection status */}
+        <div className="px-4 py-2 border-t flex items-center gap-2"
+          style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          {connected
+            ? <><span className="pulse-live" /><span className="text-xs" style={{ color: 'var(--sidebar-text)', opacity: 0.7 }}>Live</span></>
+            : <><WifiOff size={12} style={{ color: 'var(--danger)' }} /><span className="text-xs" style={{ color: 'var(--danger)' }}>Offline</span></>}
+        </div>
+
+        {/* User footer */}
+        <div className="px-3 pb-3 border-t pt-3" style={{ borderColor: 'rgba(255,255,255,0.06)' }}>
+          <div className="flex items-center gap-2.5 mb-2">
+            <div className="w-8 h-8 rounded-full flex items-center justify-center shrink-0 text-xs font-bold text-white"
+              style={{ background: 'var(--accent)' }}>{initials}</div>
+            <div className="flex-1 min-w-0">
+              <p className="text-xs font-semibold truncate text-white">{fullName ?? email}</p>
+              <p className="text-xs truncate" style={{ color: 'var(--sidebar-text)', opacity: 0.6 }}>{role}</p>
+            </div>
           </div>
-          {/* User info */}
-          <div className="rounded-md px-2 py-1.5" style={{ background: 'var(--surface-2)' }}>
-            <p className="text-xs font-medium truncate" style={{ color: 'var(--text)' }}>{fullName}</p>
-            <p className="text-xs truncate" style={{ color: 'var(--text-muted)' }}>{email}</p>
-            <span className="mt-1 inline-block badge bg-brand-100 text-brand-700 dark:bg-brand-950/50 dark:text-brand-300">
-              {role?.replace('_', ' ')}
-            </span>
-          </div>
-          {/* Actions */}
-          <div className="grid grid-cols-2 gap-1">
-            <button className="btn-ghost text-xs justify-center" onClick={toggle}>
-              {theme === 'dark' ? <Sun size={13} /> : <Moon size={13} />}
-              {theme === 'dark' ? 'Light' : 'Dark'}
+          <div className="flex items-center gap-1">
+            <button className="btn-ghost p-1.5 flex-1 justify-center rounded"
+              title="Toggle theme" onClick={toggle}
+              style={{ color: 'var(--sidebar-text)' }}>
+              {theme === 'dark' ? <Sun size={14} /> : <Moon size={14} />}
             </button>
-            <button className="btn-ghost text-xs justify-center" onClick={() => setShowChangePassword(true)}>
-              <KeyRound size={13} />
-              Password
+            <button className="btn-ghost p-1.5 flex-1 justify-center rounded"
+              title="Change password" onClick={() => setShowPwd(true)}
+              style={{ color: 'var(--sidebar-text)' }}>
+              <KeyRound size={14} />
             </button>
-            <button className="btn-ghost text-xs justify-center col-span-2" onClick={handleLogout}>
-              <LogOut size={13} />
-              Logout
+            <button className="btn-ghost p-1.5 flex-1 justify-center rounded"
+              title="Log out" onClick={handleLogout}
+              style={{ color: 'var(--sidebar-text)' }}>
+              <LogOut size={14} />
             </button>
           </div>
         </div>
       </aside>
 
-      {/* ── Main ────────────────────────────────────────────────────────── */}
-      <main className="flex flex-1 flex-col overflow-hidden">
-        <div className="flex-1 overflow-y-auto">
-          <Outlet />
-        </div>
+      {/* ── Main content ─────────────────────────────────────────────────── */}
+      <main className="flex-1 overflow-hidden flex flex-col min-w-0">
+        <Outlet />
       </main>
 
-      {showChangePassword && (
-        <ChangePasswordModal onClose={() => setShowChangePassword(false)} />
-      )}
+      {showPwd && <ChangePasswordModal onClose={() => setShowPwd(false)} />}
     </div>
   )
 }
