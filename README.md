@@ -125,8 +125,8 @@ curl -s http://<hyper-v-ip>:5985/wsman
 
 ```bash
 # 1. Clone the repository
-git clone <repo-url>
-cd HyperVisorsApp
+git clone https://github.com/indrayan-kajirnekar/HyperV-Admin-Center.git
+cd HyperV-Admin-Center
 
 # 2. (Optional) Create a backend environment override
 cp backend/.env.example backend/.env
