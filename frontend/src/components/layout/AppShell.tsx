@@ -7,7 +7,7 @@ import ChangePasswordModal from '@/components/auth/ChangePasswordModal'
 import {
   LayoutDashboard, Monitor, Server, FolderOpen,
   Users, ClipboardList, Sun, Moon, KeyRound,
-  LogOut, Wifi, WifiOff, ChevronRight,
+  LogOut, WifiOff, ChevronRight,
 } from 'lucide-react'
 
 const NAV = [
